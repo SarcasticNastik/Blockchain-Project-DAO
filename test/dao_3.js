@@ -31,7 +31,6 @@ contract("DAO Test 3", (accounts) => {
     // await sleep(5 * 1000);
     await dao.initDAO({ from: accounts[0], value: 4e6});
 
-    console.log("INITDAO Issue not resolved");
 
     let afterBalance = await dao.balanceOf(accounts[4], { from: accounts[4] });
     assert.equal(afterBalance.words[0], 0);
