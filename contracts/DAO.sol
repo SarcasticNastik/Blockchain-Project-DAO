@@ -2,6 +2,13 @@
 pragma solidity >=0.4.21 <0.9.0;
 pragma experimental ABIEncoderV2;
 
+/**
+@title Decentralized Autonomous Organizations for Venture Capital
+@notice This contract is responsible for setting up the 
+smart contract for DAO
+@author Aman Kumar Kashyap, Aman Rojjha, VJS Pranavasri
+ */
+
 contract DAO {
     mapping(address => uint256) balances;
     mapping(address => mapping(address => uint256)) allowed;
@@ -108,7 +115,9 @@ contract DAO {
     }
 
     /***********************************************************************************************/
-
+    /*
+     *@notice Progress Status for DAO
+     */
     enum DAO_STATUS {
         NOT_INITIATED, // during this phase, request for a basic amount of ETH in exchange for tokens
         NOT_PROPOSED, // means INITIATED
@@ -117,14 +126,15 @@ contract DAO {
         VOTING_BIDS_VERIFIED,
         VOTING_DECIDED // and so is transfer
     }
-
+    /*
+     *@notice Options in Proposal for DAO
+     */
     struct ProposedOption {
         uint256 sno;
         string name;
         address payable addr;
     }
 
-    // Proposal
     struct Proposal {
         address payable creator; // In case quorum is met, we transfer back the payable fee
         uint256 transfer_amount;
@@ -134,6 +144,9 @@ contract DAO {
         uint256 entranceFee; // amount in ETH paid by Proposer to propose this proposal
     }
 
+    /**
+     @notice Solution structure for Proposals
+     */
     struct ProposalSolution {
         bool minQuorum; // if it reaches minQuorum or not
         mapping(address => bytes32) userSecretVotes;
@@ -154,7 +167,6 @@ contract DAO {
     uint256 constant loopbackTimeout = 10 seconds;
     uint256 constant minPayableFee = 1e4;
     uint256 constant minQuorumRatio = 4; // 1:4 i.e. atleast 25% of the voters must decide on the value
-
     // minimum ETH required for creation of the DAO
     uint256 constant minCreationETH = 1e6;
 
@@ -163,10 +175,7 @@ contract DAO {
     address[] usersWithoutToken;
     uint256 globalSeed;
     address payable immutable owner;
-    // mapping(Proposal => uint256) proposalFee;
-    // Proposal[] public proposals;
     Proposal public proposal;
-    // ProposalSolution[] finalDecisions;
     ProposalSolution currProposalSolution;
     uint256 initTime;
     uint256 initialFunds;
@@ -175,7 +184,6 @@ contract DAO {
     uint256[] votesAcquired;
 
     event TimeDiff(uint256 startTime, uint256 endTime, uint256 diffTime);
-
     event OwnerFunds(address payable _addr, uint256 balance);
 
     constructor() {
@@ -194,8 +202,10 @@ contract DAO {
         }
     }
 
-    // user utilities
-    // maxCreationPeriod min modifier and status modifier (require)
+    /**
+     @notice User requests DAI-MA in exchange for WEI 
+     @param _amt: uint256 (in wei)
+     */
     function userReqToken(uint256 _amt) public payable returns (bool success) {
         // require(
         //     block.timestamp - initTime <= maxCreationPeriod,
@@ -213,6 +223,9 @@ contract DAO {
         return true;
     }
 
+    /**
+     @notice User can revoke his DAI-MA in exchange for WEI
+     */
     function userRevokeToken() public payable returns (bool) {
         // require(
         //     block.timestamp - initTime > maxCreationPeriod,
@@ -228,6 +241,9 @@ contract DAO {
         return true;
     }
 
+    /**
+     @return currTokenRate
+     */
     function currTokenRate() public view returns (uint256) {
         require(
             block.timestamp - initTime <= maxCreationPeriod,
@@ -247,6 +263,9 @@ contract DAO {
     }
     event SuccessInitDao(bool);
 
+    /**
+     @notice get current block time
+     */
     function getTime() public view returns (uint256) {
         return block.timestamp;
     }
@@ -254,11 +273,9 @@ contract DAO {
     event StringEvent(string ev, uint256 price);
     event DAOStatus(DAO_STATUS dao_status, DAO_STATUS status2);
 
-    // initDAO
-    // - check changes in token object (mappings of users to tokens)
-    // - test for
-    //   1. Status of dao
-    //   2. Time taken
+    /**
+     @notice check changes in token object 
+     */
     function initDAO() public payable ownerOnly {
         require(daoStatus == DAO_STATUS.NOT_INITIATED, "can't initialize DAO");
         // require(
@@ -295,6 +312,11 @@ contract DAO {
         _;
     }
 
+    /**
+     @notice Token-holder proposes new options for proposal
+     @param nname: Name for the option
+     @param addr: Address for the venture
+     */
     function propose(string memory nname, address payable addr)
         public
         usersWithTokensOnly
@@ -336,6 +358,9 @@ contract DAO {
         initTime = block.timestamp;
     }
 
+    /** 
+     @notice Finalize proposal stage
+     */
     function endPropose() public usersWithTokensOnly {
         require(daoStatus == DAO_STATUS.NOT_PROPOSED, "can't end proposal yet");
         require(
@@ -357,7 +382,10 @@ contract DAO {
         return keccak256(abi.encode(msg.sender, arr));
     }
 
-    // Voting
+    /**
+     @notice Token-holders secretly bid for current proposal
+     @param secretRanking: hashed bids for rankings
+     */
     function secretBid(bytes32 secretRanking) public usersWithTokensOnly {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_BID,
@@ -373,6 +401,9 @@ contract DAO {
         ] = secretRanking;
     }
 
+    /**
+     @notice Verify that minimum quorum is satisfied
+     */
     function verifyQuorum() public ownerOnly returns (bool) {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_BID,
@@ -433,6 +464,10 @@ contract DAO {
         }
     }
 
+    /**
+     @notice Reveal the secret bids
+     @param ranking: permutation of ranking
+     */
     function revealBid(uint256[] memory ranking) public usersWithTokensOnly {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_VERIFICATION,
@@ -449,6 +484,9 @@ contract DAO {
         }
     }
 
+    /*
+     *@notice Verify that all revealed bids are valid
+     */
     function verifyAllBids() public ownerOnly returns (bool) {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_VERIFICATION,
@@ -506,9 +544,9 @@ contract DAO {
         }
     }
 
-    // DAO acc -> winner payment
-    // 1. Find winner through majority voting
-    // 2. Pay the requisite amount
+    /**
+     @notice Find winner through majority voting
+     */
     function takeDecision() public payable ownerOnly {
         require(
             daoStatus == DAO_STATUS.VOTING_BIDS_VERIFIED,
@@ -557,6 +595,9 @@ contract DAO {
         daoStatus = DAO_STATUS.VOTING_DECIDED;
     }
 
+    /**
+     @notice Return currentWinner
+     */
     function currWinner() public view returns (string memory) {
         require(
             daoStatus == DAO_STATUS.VOTING_DECIDED,
