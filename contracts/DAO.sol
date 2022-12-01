@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity >=0.4.21 <0.9.0;
 pragma experimental ABIEncoderV2;
 
 contract DAO {
@@ -108,6 +108,7 @@ contract DAO {
     }
 
     /***********************************************************************************************/
+
     enum DAO_STATUS {
         NOT_INITIATED, // during this phase, request for a basic amount of ETH in exchange for tokens
         NOT_PROPOSED, // means INITIATED
@@ -131,7 +132,6 @@ contract DAO {
         // ProposedOption[] options; // infer the proposal status from global status
         mapping(uint256 => ProposedOption) options;
         uint256 entranceFee; // amount in ETH paid by Proposer to propose this proposal
-        // FIXME: later on
     }
 
     struct ProposalSolution {
@@ -146,7 +146,7 @@ contract DAO {
     }
 
     // if minCreationETH not reached, revert ETH to everyone back else send tokens
-    uint256 constant maxCreationPeriod = 5 seconds;
+    uint256 constant maxCreationPeriod = 10 seconds;
     uint256 constant votingSecretPeriod = 10 seconds;
     uint256 constant votingNormalPeriod = 10 seconds;
     // revert to new proposal on failing this
@@ -174,23 +174,22 @@ contract DAO {
     address[] usersWhoVoted;
     uint256[] votesAcquired;
 
-    event TimeDiff(uint256 startTime, uint256 endTime);
+    event TimeDiff(uint256 startTime, uint256 endTime, uint256 diffTime);
 
     event OwnerFunds(address payable _addr, uint256 balance);
 
     constructor() {
         owner = payable(msg.sender);
         globalSeed = 42;
-        daoStatus = DAO_STATUS.NOT_INITIATED;
         initTime = block.timestamp;
-        emit TimeDiff(initTime, initTime);
+        // emit TimeDiff(initTime, initTime, 0);
         // initialFunds = owner.balance;
         totalWei = 0;
     }
 
     function payThis(address payable addr, uint256 price) public payable {
         if (price > 0) {
-            require(msg.value >= price);
+            require(msg.value >= price, "Not enough money");
             addr.transfer(price);
         }
     }
@@ -198,16 +197,16 @@ contract DAO {
     // user utilities
     // maxCreationPeriod min modifier and status modifier (require)
     function userReqToken(uint256 _amt) public payable returns (bool success) {
-        require(
-            block.timestamp - initTime <= maxCreationPeriod,
-            "user can only request tokens in creation period"
-        );
+        // require(
+        //     block.timestamp - initTime <= maxCreationPeriod,
+        //     "user can only request tokens in creation period"
+        // );
         require(
             daoStatus == DAO_STATUS.NOT_INITIATED,
             "user can only request tokens in creation period"
         );
         // sent _amt in ETH
-        payThis(owner, (_amt / 100) * 100);
+        payThis(owner, _amt);
 
         usersWithTokens.push(address(msg.sender));
         giveToken(_amt, address(msg.sender));
@@ -215,17 +214,17 @@ contract DAO {
     }
 
     function userRevokeToken() public payable returns (bool) {
-        require(
-            block.timestamp - initTime <= maxCreationPeriod,
-            "users can only revoke tokens in creation period"
-        );
+        // require(
+        //     block.timestamp - initTime > maxCreationPeriod,
+        //     "users can only revoke tokens in creation period"
+        // );
         require(
             daoStatus == DAO_STATUS.NOT_INITIATED,
             "users can only revoke tokens in creation period"
         );
 
         usersWithoutToken.push(address(msg.sender));
-        emit TimeDiff(block.timestamp, initTime);
+        // emit TimeDiff(block.timestamp, initTime, block.timestamp - initTime);
         return true;
     }
 
@@ -248,29 +247,35 @@ contract DAO {
     }
     event SuccessInitDao(bool);
 
+    function getTime() public view returns (uint256) {
+        return block.timestamp;
+    }
+
+    event StringEvent(string ev, uint256 price);
+    event DAOStatus(DAO_STATUS dao_status, DAO_STATUS status2);
+
     // initDAO
     // - check changes in token object (mappings of users to tokens)
     // - test for
     //   1. Status of dao
     //   2. Time taken
-    function initDAO() public ownerOnly {
+    function initDAO() public payable ownerOnly {
         require(daoStatus == DAO_STATUS.NOT_INITIATED, "can't initialize DAO");
-        require(
-            block.timestamp - initTime > maxCreationPeriod,
-            "still waiting for users to buy tokens"
-        );
-        emit TimeDiff(block.timestamp, initTime);
+        // require(
+        //     block.timestamp - initTime > maxCreationPeriod,
+        //     "still waiting for users to buy tokens"
+        // );
 
         if (totalWei >= minCreationETH) {
             // success
             emit SuccessInitDao(true);
-            daoStatus = DAO_STATUS.NOT_PROPOSED;
             for (uint256 i = 0; i < usersWithoutToken.length; i++) {
                 (uint256 amt, ) = revokeAllTokens(usersWithoutToken[i]); // if not success, then balances never really existed.
+                emit StringEvent("Here3", amt);
                 payThis(payable(usersWithoutToken[i]), amt);
             }
             initTime = block.timestamp;
-            daoStatus = DAO_STATUS.NOT_PROPOSED;
+            daoStatus = DAO_STATUS(1);
         } else {
             emit SuccessInitDao(false);
             for (uint256 i = 0; i < usersWithTokens.length; i++) {
@@ -292,26 +297,50 @@ contract DAO {
 
     function propose(string memory nname, address payable addr)
         public
-        payable
         usersWithTokensOnly
     {
         require(
-            (daoStatus == DAO_STATUS.NOT_PROPOSED &&
-                ((block.timestamp - initTime) <= maxProposalPeriod)) ||
-                (daoStatus == DAO_STATUS.VOTING_DECIDED &&
-                    ((block.timestamp - initTime) > loopbackTimeout))
+            (daoStatus == DAO_STATUS.NOT_PROPOSED ||
+                daoStatus == DAO_STATUS.VOTING_DECIDED),
+            "Can't propose yet!"
         );
+
         require(
             proposal.creator == address(0x0) ||
                 proposal.creator == payable(msg.sender),
             "different proposers can't propose concurrently"
         );
+
+        if (daoStatus == DAO_STATUS.VOTING_DECIDED) {
+            //reset
+            currProposalSolution.decided = false;
+            currProposalSolution.minQuorum = false;
+            currProposalSolution.winner = 0;
+            delete usersWhoVoted;
+            delete votesAcquired;
+            for (uint i = 0; i < usersWithTokens.length; i++) {
+                currProposalSolution.userSecretVotes[usersWithTokens[i]] = bytes32(0x0);    
+            }
+            for (uint i = 0; i < usersWithTokens.length; i++) {
+                delete currProposalSolution.userVotes[usersWithTokens[i]];
+            }
+            
+        }
+
         proposal.creator = payable(msg.sender);
         proposal.options[proposal.num_options].name = nname;
         proposal.options[proposal.num_options].sno = proposal.num_options;
         proposal.options[proposal.num_options].addr = addr;
         proposal.num_options += 1;
         initTime = block.timestamp;
+    }
+
+    function endPropose() public usersWithTokensOnly {
+        require(daoStatus == DAO_STATUS.NOT_PROPOSED, "can't end proposal yet");
+        require(
+            proposal.creator == payable(msg.sender),
+            "different proposers can't propose concurrently"
+        );
         daoStatus = DAO_STATUS.VOTING_PENDING_BID;
     }
 
@@ -333,25 +362,25 @@ contract DAO {
             daoStatus == DAO_STATUS.VOTING_PENDING_BID,
             "secret bids aren't pending yet"
         );
-        require(
-            block.timestamp - initTime <= votingSecretPeriod,
-            "secret bid period is either over or didn't happen yet"
-        );
+        // require(
+        //     block.timestamp - initTime <= votingSecretPeriod,
+        //     "secret bid period is either over or didn't happen yet"
+        // );
 
         currProposalSolution.userSecretVotes[
             address(msg.sender)
         ] = secretRanking;
     }
 
-    function verifyQuorum() public ownerOnly {
+    function verifyQuorum() public ownerOnly returns (bool) {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_BID,
             "quorum can't be checked without pending bids"
         );
-        require(
-            block.timestamp - initTime > votingSecretPeriod,
-            "can't check quorum within secret bid period"
-        );
+        // require(
+        //     block.timestamp - initTime > votingSecretPeriod,
+        //     "can't check quorum within secret bid period"
+        // );
 
         uint256 totalVotersBidding = 0;
         for (uint256 i = 0; i < usersWithTokens.length; i++) {
@@ -376,6 +405,7 @@ contract DAO {
             daoStatus = DAO_STATUS.VOTING_PENDING_VERIFICATION;
             initTime = block.timestamp;
             currProposalSolution.minQuorum = true;
+            return true;
         } else {
             // fallback to no proposal
             currProposalSolution.minQuorum = false;
@@ -395,8 +425,10 @@ contract DAO {
             proposal.num_options = 0;
             proposal.transfer_amount = 0;
             initTime = block.timestamp;
-
+            delete usersWhoVoted;
+            delete votesAcquired;
             daoStatus = DAO_STATUS.NOT_PROPOSED;
+            return false;
         }
     }
 
@@ -405,10 +437,10 @@ contract DAO {
             daoStatus == DAO_STATUS.VOTING_PENDING_VERIFICATION,
             "revealed bids shouldn't be called yet"
         );
-        require(
-            block.timestamp - initTime <= votingNormalPeriod,
-            "can only reveal bids in revelation period"
-        );
+        // require(
+        //     block.timestamp - initTime <= votingNormalPeriod,
+        //     "can only reveal bids in revelation period"
+        // );
 
         bytes32 hsh = generateBidHash(ranking);
         if (hsh == currProposalSolution.userSecretVotes[address(msg.sender)]) {
@@ -416,15 +448,15 @@ contract DAO {
         }
     }
 
-    function verifyAllBids() public ownerOnly {
+    function verifyAllBids() public ownerOnly returns (bool) {
         require(
             daoStatus == DAO_STATUS.VOTING_PENDING_VERIFICATION,
             "revealed bids shouldn't be called yet"
         );
-        require(
-            block.timestamp - initTime > votingNormalPeriod,
-            "can verify all bids only after revealing all of them"
-        );
+        // require(
+        //     block.timestamp - initTime > votingNormalPeriod,
+        //     "can verify all bids only after revealing all of them"
+        // );
 
         bool ok = true;
         for (uint256 i = 0; i < usersWithTokens.length; i++) {
@@ -446,6 +478,7 @@ contract DAO {
         if (ok) {
             daoStatus = DAO_STATUS.VOTING_BIDS_VERIFIED;
             initTime = block.timestamp;
+            return true;
         } else {
             //  fallback mechanism
             currProposalSolution.minQuorum = false;
@@ -464,9 +497,11 @@ contract DAO {
                 proposal.options[i] = tmp;
             proposal.num_options = 0;
             proposal.transfer_amount = 0;
-
+            delete usersWhoVoted;
+            delete votesAcquired;
             initTime = block.timestamp;
             daoStatus = DAO_STATUS.NOT_PROPOSED;
+            return false;
         }
     }
 
@@ -518,15 +553,6 @@ contract DAO {
         payThis(win_option.options[winner].addr, win_option.transfer_amount);
         initTime = block.timestamp;
 
-        // currProposal Reset
-        currProposalSolution.decided = false;
-        currProposalSolution.minQuorum = false;
-        // for (uint256 i = 0; i < usersWhoVoted.length; b i++) {
-        //     currProposalSolution.userSecretVotes[usersWhoVoted[i]] = 0x0;
-        //     currProposalSolution.userVotes[usersWhoVoted[i]] = arr;
-        // }
-        currProposalSolution.winner = 0;
-
         daoStatus = DAO_STATUS.VOTING_DECIDED;
     }
 
@@ -535,7 +561,6 @@ contract DAO {
             daoStatus == DAO_STATUS.VOTING_DECIDED,
             "voting for proposal isn't over yet"
         );
-        require(currProposalSolution.decided, "Proposal failed!");
         return proposal.options[currProposalSolution.winner].name;
     }
 }
