@@ -318,13 +318,14 @@ contract DAO {
             currProposalSolution.winner = 0;
             delete usersWhoVoted;
             delete votesAcquired;
-            for (uint i = 0; i < usersWithTokens.length; i++) {
-                currProposalSolution.userSecretVotes[usersWithTokens[i]] = bytes32(0x0);    
+            for (uint256 i = 0; i < usersWithTokens.length; i++) {
+                currProposalSolution.userSecretVotes[
+                    usersWithTokens[i]
+                ] = bytes32(0x0);
             }
-            for (uint i = 0; i < usersWithTokens.length; i++) {
+            for (uint256 i = 0; i < usersWithTokens.length; i++) {
                 delete currProposalSolution.userVotes[usersWithTokens[i]];
             }
-            
         }
 
         proposal.creator = payable(msg.sender);
