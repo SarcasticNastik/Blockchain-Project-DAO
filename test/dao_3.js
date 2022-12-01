@@ -5,7 +5,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-contract("DAO Test 1", (accounts) => {
+contract("DAO Test 3", (accounts) => {
   let rankings = [[1, 0, 3, 2], [0, 1, 2, 3], [1, 3, 2, 0], [1, 2, 0, 3]];
 
   it("should deploy the DAO contract", async () => {
@@ -45,6 +45,15 @@ contract("DAO Test 1", (accounts) => {
     await dao.propose("Mercedes", accounts[6], { from: accounts[2] });
     await dao.propose("Ferrari", accounts[7], { from: accounts[2] });
     await dao.propose("Mitsubushi", accounts[8], { from: accounts[2] });
+
+    try{
+      await dao.endPropose({ from: accounts[1] });
+      // This should not be reached
+      assert.isOk(false);
+    } catch(e){
+      assert.isOk(e)
+    }
+
     await dao.endPropose({from: accounts[2]});
   });
 
